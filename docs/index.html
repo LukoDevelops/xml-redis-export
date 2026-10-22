@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>XML to Redis Web Version</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: two panes, XML in on the left, saved Redis keys on the right; stacks on phones */
+:root {
+  --bg: #f5f7f8; --panel: #ffffff; --fg: #17222a; --muted: #5d6b75; --line: #dbe2e6;
+  --accent: #0f6e73; --accent-fg: #ffffff; --term: #10191f; --term-fg: #d5e4e6; --key: #7fd3cf; --err: #b3261e; --err-bg: #fbeceb; --ok: #1d7a46;
+  --sans: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0e1418; --panel: #151e24; --fg: #e3eaee; --muted: #93a3ad; --line: #26333b;
+  --accent: #4fb8b3; --accent-fg: #062224; --term: #0a1014; --term-fg: #d5e4e6; --key: #7fd3cf; --err: #ff8a80; --err-bg: #3a1a18; --ok: #6fd39a; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0e1418; --panel: #151e24; --fg: #e3eaee; --muted: #93a3ad; --line: #26333b;
+  --accent: #4fb8b3; --accent-fg: #062224; --term: #0a1014; --term-fg: #d5e4e6; --key: #7fd3cf; --err: #ff8a80; --err-bg: #3a1a18; --ok: #6fd39a; color-scheme: dark }
+
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--sans); font-size: 15px; line-height: 1.5; }
+.wrap { max-width: 1180px; margin: 0 auto; padding-block: 28px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; gap: 20px; }
+header { display: grid; gap: 6px; }
+h1 { font-size: 1.6rem; font-weight: 600; margin: 0; text-wrap: balance; letter-spacing: -0.01em; }
+.lede { color: var(--muted); margin: 0; max-width: 68ch; }
+.lede code, .note code { font-family: var(--mono); font-size: 0.86em; }
+.grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+@media (max-width: 860px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+.pane { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; display: grid; min-width: 0; }
+.pane-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.label { font-size: 0.75rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+textarea { width: 100%; box-sizing: border-box; min-height: 440px; resize: vertical; border: 0; padding: 14px; background: transparent; color: var(--fg);
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55; tab-size: 4; white-space: pre; overflow: auto; border-radius: 0 0 10px 10px; }
+textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+button, .file-btn { font: 500 0.88rem var(--sans); border-radius: 7px; padding: 7px 13px; cursor: pointer; border: 1px solid var(--line); background: var(--panel); color: var(--fg); }
+button:hover, .file-btn:hover { border-color: var(--muted); }
+button:focus-visible, .file-btn:focus-within, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.file-btn input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.file-btn { position: relative; display: inline-block; }
+.toggle { display: flex; align-items: center; gap: 6px; font-size: 0.88rem; color: var(--muted); cursor: pointer; }
+.terminal { background: var(--term); color: var(--term-fg); font-family: var(--mono); font-size: 12.5px; line-height: 1.6; padding: 14px; margin: 0;
+  min-height: 200px; max-height: 440px; overflow: auto; white-space: pre-wrap; word-break: break-all; border-radius: 0 0 10px 10px; }
+.terminal .prompt { color: var(--muted); }
+.terminal .k { color: var(--key); }
+.terminal .bad { color: #ff8a80; }
+.terminal .good { color: #8fe0ad; }
+.lookup { display: grid; gap: 10px; padding: 14px; border-top: 1px solid var(--line); }
+.lookup-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.lookup input { flex: 1 1 220px; min-width: 0; font: 13px var(--mono); padding: 8px 10px; border-radius: 7px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
+.result { font-family: var(--mono); font-size: 12.5px; background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 10px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; min-height: 1.6em; }
+.result.miss { color: var(--muted); }
+.stats { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { font-size: 0.8rem; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); font-variant-numeric: tabular-nums; }
+.chip.ok { color: var(--ok); border-color: currentColor; }
+.chip.err { color: var(--err); background: var(--err-bg); border-color: currentColor; }
+.note { color: var(--muted); font-size: 0.86rem; margin: 0; max-width: 80ch; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>XML to Redis: web version</h1>
+    <p class="lede">Press <strong>Run export</strong> to see the keys that get saved to Redis. The sample config is already loaded, or you can paste or upload your own.</p>
+  </header>
+
+  <div class="grid">
+    <section class="pane" aria-labelledby="in-label">
+      <div class="pane-head">
+        <span class="label" id="in-label">config.xml</span>
+        <div class="actions">
+          <label class="file-btn">Upload XML<input type="file" id="file" accept=".xml,text/xml"></label>
+          <button type="button" id="reset">Load sample</button>
+          <button type="button" id="break">Try a broken file</button>
+        </div>
+      </div>
+      <textarea id="xml" spellcheck="false" aria-label="XML input"></textarea>
+    </section>
+
+    <section class="pane" aria-labelledby="out-label">
+      <div class="pane-head">
+        <span class="label" id="out-label">Redis</span>
+        <div class="actions">
+          <label class="toggle"><input type="checkbox" id="verbose" checked> Show keys (-v)</label>
+          <button type="button" class="primary" id="run">Run export</button>
+        </div>
+      </div>
+      <div class="stats" id="stats" style="padding: 10px 14px 0;"></div>
+      <pre class="terminal" id="out" aria-live="polite"></pre>
+      <div class="lookup">
+        <span class="label">Look up a key</span>
+        <div class="lookup-row">
+          <input id="key" type="text" value="cookie:dlp-avast:amazon" aria-label="Redis key" autocomplete="off">
+          <button type="button" id="get">GET</button>
+        </div>
+        <div class="result" id="result" aria-live="polite"></div>
+      </div>
+    </section>
+  </div>
+
+  <p class="note">Runs in your browser with a pretend Redis. The <a href="https://github.com/LukoDevelops/xml-redis-export" style="color: var(--accent)">real app</a> saves to an actual Redis through Docker.</p>
+</div>
+
+<script>
+const SAMPLE_URL = 'https://raw.githubusercontent.com/LukoDevelops/xml-redis-export/main/data/config.xml';
+let SAMPLE = '';
+const $ = (id) => document.getElementById(id);
+let store = new Map();
+
+// Same rules as src/parser.js: valid XML, <config> root, cookies need name and host.
+function parseConfig(xml) {
+  const doc = new DOMParser().parseFromString(xml, 'application/xml');
+  const err = doc.querySelector('parsererror');
+  if (err) {
+    const msg = err.textContent.match(/error on line[^\n]*/i)?.[0] || err.textContent.split('\n')[0];
+    throw new Error('Invalid XML: ' + msg.replace(/\s+/g, ' ').trim());
+  }
+  const root = doc.documentElement;
+  if (root.nodeName !== 'config') throw new Error('Invalid config: missing <config> root element');
+  const subdomains = [...root.querySelectorAll(':scope > subdomains > subdomain')]
+    .map((n) => n.textContent.trim()).filter(Boolean);
+  const cookies = [...root.querySelectorAll(':scope > cookies > cookie')].map((c, i) => {
+    const name = c.getAttribute('name'), host = c.getAttribute('host');
+    if (!name || !host) throw new Error(`Invalid config: cookie #${i + 1} is missing "name" or "host" attribute`);
+    return { name, host, value: c.textContent.trim() };
+  });
+  return { subdomains, cookies };
+}
+
+// Same rules as src/exporter.js.
+function buildEntries({ subdomains, cookies }) {
+  const entries = new Map([['subdomains', JSON.stringify(subdomains)]]);
+  for (const { name, host, value } of cookies) entries.set(`cookie:${name}:${host}`, value);
+  return entries;
+}
+
+const esc = (s) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
+
+function run() {
+  const verbose = $('verbose').checked;
+  const cmd = `<span class="prompt">$ ./export.sh ${verbose ? '-v ' : ''}config.xml</span>\n`;
+  try {
+    const entries = buildEntries(parseConfig($('xml').value));
+    store = entries; // all or nothing, like MULTI/EXEC
+    const lines = verbose ? [...entries].map(([k, v]) => `<span class="k">${esc(k)}</span> = ${esc(v)}`).join('\n') + '\n' : '';
+    $('out').innerHTML = cmd + lines + `<span class="good">Exported ${entries.size} keys to Redis.</span>`;
+    const cookies = entries.size - 1;
+    const subs = JSON.parse(entries.get('subdomains')).length;
+    $('stats').innerHTML = `<span class="chip ok">${entries.size} keys saved</span><span class="chip">${subs} subdomains</span><span class="chip">${cookies} cookies</span>`;
+  } catch (e) {
+    store = new Map();
+    $('out').innerHTML = cmd + `<span class="bad">Error: ${esc(e.message)}</span>\n<span class="prompt">Nothing was written to Redis.</span>`;
+    $('stats').innerHTML = `<span class="chip err">Export failed</span>`;
+  }
+  lookup();
+}
+
+function lookup() {
+  const k = $('key').value.trim();
+  const r = $('result');
+  if (store.has(k)) { r.textContent = store.get(k); r.className = 'result'; }
+  else { r.textContent = store.size ? '(nil)  no such key' : '(nil)  run the export first'; r.className = 'result miss'; }
+}
+
+$('run').addEventListener('click', run);
+$('verbose').addEventListener('change', run);
+$('get').addEventListener('click', lookup);
+$('key').addEventListener('keydown', (e) => { if (e.key === 'Enter') lookup(); });
+$('reset').addEventListener('click', () => { $('xml').value = SAMPLE; run(); });
+$('break').addEventListener('click', () => {
+  $('xml').value = SAMPLE.replace('<cookie name="dlp-avast" host="chip">', '<cookie name="dlp-avast">').replace('</subdomains>', '');
+  run();
+});
+$('file').addEventListener('change', async (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  $('xml').value = await f.text(); e.target.value = ''; run();
+});
+
+fetch(SAMPLE_URL).then((r) => r.text()).then((xml) => { SAMPLE = xml; $('xml').value = xml; run(); })
+  .catch(() => { $('out').textContent = 'Could not load the sample. Paste or upload an XML file instead.'; });
+</script>
+</body>
+</html>
